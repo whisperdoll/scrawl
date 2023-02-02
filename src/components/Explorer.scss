@@ -1,0 +1,50 @@
+.Explorer {
+  background-color: black;
+  border-right: 1px solid #aaa;
+  width: 200px;
+  color: white;
+
+  .Node {
+    padding: 0.5rem 1rem;
+    cursor: pointer;
+
+    &:hover {
+      background-color: rgba(255,255,255,0.2);
+    }
+  }
+
+  .FileNode {
+    color: white;
+  }
+
+  .FolderNode {
+    // color: #FFCCFF;
+
+    &.open {
+      .label:after {
+        content: 'v';
+        float: right;
+      }
+    }
+
+    &.closed {
+      .label:after {
+        content: '>';
+        float: right;
+      }
+    }
+
+    .children {
+      padding-left: 0rem;
+      width: 100%;
+  
+      .Node {
+        margin-right: -1rem;
+      }
+  
+      &:not(:empty) {
+        margin-top: 0.5rem;
+      }
+    }
+  }
+}
