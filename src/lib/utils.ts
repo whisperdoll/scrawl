@@ -67,3 +67,19 @@ export function rectContainsPoint(rect: Rect, point: Point) {
 export function pointArray(pt: Point): [number, number] {
   return [pt.x, pt.y];
 }
+
+export function polygonContainsPoint(polygon: Point[], point: Point) {
+  const { x, y } = point;
+  let inside = false;
+
+  for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+    const { x: xi, y: yi } = polygon[i];
+    const { x: xj, y: yj } = polygon[j];
+
+    const intersect =
+      yi > y !== yj > y && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi;
+    if (intersect) inside = !inside;
+  }
+
+  return inside;
+}

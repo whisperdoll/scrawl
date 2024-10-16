@@ -6,6 +6,7 @@ interface EraseTool extends Tool {
   lastRecorded: Point;
   onMove: Required<Tool>["onMove"];
   onDown: Required<Tool>["onMove"];
+  onUp: Required<Tool>["onMove"];
 }
 
 const Erase: EraseTool = {
@@ -68,7 +69,11 @@ const Erase: EraseTool = {
     this.lastRecorded = context.mouse.documentPosition.current;
   },
   onDown(context) {
+    context.disallowTouchScroll();
     this.lastRecorded = context.mouse.documentPosition.current;
+  },
+  onUp(context) {
+    context.allowTouchScroll();
   },
 };
 

@@ -1,12 +1,13 @@
 import { adjust } from "../lib/offsetHelpers.js";
 import { DocumentData, Point } from "../lib/types.ts";
+import { pointArray } from "../lib/utils.ts";
 
 export interface Tool {
   onMove?: (context: ToolContext) => any;
   onUp?: (context: ToolContext) => any;
   onDown?: (context: ToolContext) => any;
-  onSelect?: (context: ToolContext) => any;
-  onDeselect?: (context: ToolContext) => any;
+  onSelect?: (context: SelectContext) => any;
+  onDeselect?: (context: SelectContext) => any;
   render?: (context: RenderContext) => any;
 }
 
@@ -18,7 +19,13 @@ export interface RenderContext {
   size: number;
 }
 
-export interface ToolContext extends RenderContext {
+export interface SelectContext extends RenderContext {
+  markDirty: () => void;
+  allowTouchScroll: () => void;
+  disallowTouchScroll: () => void;
+}
+
+export interface ToolContext extends SelectContext {
   e: PointerEvent;
   mouse: {
     isDown: boolean;
@@ -33,20 +40,22 @@ export interface ToolContext extends RenderContext {
       original: Point;
     };
   };
-  markDirty: () => any;
 }
 
-export function drawLine(
-  context: ToolContext,
-  from: Point,
-  to: Point,
-  options?: {
-    color?: string;
-    size?: number;
+export function drawPolyLine(
+  canvas: HTMLCanvasElement,
+  points: Point[],
+  options: {
+    color: string;
+    size: number;
+    offset: Point;
     drawMode?: "document" | "viewport";
+    lineDash?: number[];
   }
 ) {
-  const canvasContext = context.canvas.getContext("2d");
+  if (points.length === 0) return;
+
+  const canvasContext = canvas.getContext("2d");
   if (!canvasContext) {
     throw new Error("couldnt get context lol");
   }
@@ -54,17 +63,35 @@ export function drawLine(
   canvasContext.lineCap = "round";
   canvasContext.lineJoin = "round";
 
-  canvasContext.fillStyle = options?.color || context.color;
-  canvasContext.strokeStyle = options?.color || context.color;
-  canvasContext.lineWidth = options?.size || context.size;
+  canvasContext.fillStyle = options.color;
+  canvasContext.strokeStyle = options.color;
+  canvasContext.lineWidth = options.size;
+  canvasContext.setLineDash(options.lineDash || []);
 
-  const adjustedFrom =
-    options?.drawMode === "viewport" ? from : adjust(from, context.offset, -1);
-  const adjustedTo =
-    options?.drawMode === "viewport" ? to : adjust(to, context.offset, -1);
+  const adjustedPoints =
+    options?.drawMode === "viewport"
+      ? points
+      : points.map((p) => adjust(p, options.offset));
 
   canvasContext.beginPath();
-  canvasContext.moveTo(adjustedFrom.x, adjustedFrom.y);
-  canvasContext.lineTo(adjustedTo.x, adjustedTo.y);
+  canvasContext.moveTo(...pointArray(adjustedPoints[0]));
+  for (let i = 1; i < adjustedPoints.length; i++) {
+    canvasContext.lineTo(...pointArray(adjustedPoints[i]));
+  }
   canvasContext.stroke();
+}
+
+export function drawLine(
+  canvas: HTMLCanvasElement,
+  from: Point,
+  to: Point,
+  options: {
+    color: string;
+    size: number;
+    offset: Point;
+    drawMode?: "document" | "viewport";
+    lineDash?: number[];
+  }
+) {
+  drawPolyLine(canvas, [from, to], options);
 }

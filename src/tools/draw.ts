@@ -1,5 +1,5 @@
-import { DocumentData, Point } from "../lib/types.js";
-import { distance as distanceBetween } from "../lib/utils.js";
+import { DocumentData, Point } from "../lib/types.ts";
+import { distance as distanceBetween } from "../lib/utils.ts";
 import Erase from "./erase.ts";
 import { drawLine, Tool, ToolContext } from "./helpers.ts";
 
@@ -26,27 +26,35 @@ const Draw: DrawTool = {
     );
     if (distance < data.at(-1)!.size / 2) return false;
 
+    this.lastRecorded = mouse.documentPosition.current;
     data.at(-1)!.points.push(mouse.documentPosition.current);
     drawLine(
-      context,
+      context.canvas,
       mouse.documentPosition.last,
-      mouse.documentPosition.current
+      mouse.documentPosition.current,
+      {
+        color: context.color,
+        size: context.size,
+        offset: context.offset,
+      }
     );
 
     return false;
   },
   onUp(context: ToolContext) {
     if (context.e.button === 0) {
+      context.allowTouchScroll();
       context.data.current
         .at(-1)!
         .points.push(context.mouse.documentPosition.current);
       context.markDirty();
     } else if (context.e.button === 2 || context.e.button === 5) {
-      return Erase.onUp?.call(Erase, context);
+      return Erase.onUp.call(Erase, context);
     }
   },
   onDown(context: ToolContext) {
     if (context.e.button === 0) {
+      context.disallowTouchScroll();
       this.lastRecorded = context.mouse.documentPosition.current;
       context.data.current.push({
         action: "draw",

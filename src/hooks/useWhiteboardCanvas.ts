@@ -9,6 +9,8 @@ import Draw from "../tools/draw.ts";
 import { DocumentData } from "../lib/types.ts";
 import Erase from "../tools/erase.ts";
 import Select from "../tools/select.ts";
+import { Tool } from "../tools/helpers.ts";
+import Lasso from "../tools/lasso.ts";
 
 /*
   data format:
@@ -41,14 +43,21 @@ export default function useWhiteboardCanvas(
   const selectedIndexes = useRef([]);
   const selectRect = useRef({ x: 0, y: 0, w: 0, h: 0 });
   const offset = useRef({ x: 0, y: 0 });
+  const touchScrollAllowed = useRef(true);
+  const isTouchScrolling = useRef(false);
 
-  const currentTool = useMemo(() => {
-    return {
-      draw: Draw,
-      erase: Erase,
-      select: Select,
-    }[tool];
+  const currentTool: Tool | null = useMemo(() => {
+    return (
+      {
+        draw: Draw,
+        erase: Erase,
+        select: Select,
+        lasso: Lasso,
+      }[tool] || null
+    );
   }, [tool]);
+
+  const lastTool = useRef<Tool | null>(null);
 
   const renderCurrentTool = useCallback(() => {
     currentTool?.render?.call(currentTool, {
@@ -68,6 +77,30 @@ export default function useWhiteboardCanvas(
     offset,
     renderCurrentTool
   );
+
+  useEffect(() => {
+    const selectContext = {
+      canvas: canvas.current,
+      color,
+      size,
+      data,
+      offset: offset.current,
+      markDirty,
+      allowTouchScroll() {
+        touchScrollAllowed.current = true;
+      },
+      disallowTouchScroll() {
+        touchScrollAllowed.current = false;
+      },
+    };
+
+    if (lastTool.current) {
+      lastTool.current.onDeselect?.call(lastTool.current, selectContext);
+    }
+
+    lastTool.current = currentTool;
+    currentTool?.onSelect?.call(currentTool, selectContext);
+  }, [currentTool]);
 
   useEffectAsync(async () => {
     const store = localforage.createInstance({
@@ -92,6 +125,17 @@ export default function useWhiteboardCanvas(
       const adjustedPos = adjust(pos, offset.current, -1);
       mousePosition.current = adjustedPos;
 
+      // touch scrolling
+      if (isTouchScrolling.current) {
+        offset.current = {
+          x: offset.current.x + (pos.x - lastPos.x),
+          y: offset.current.y + (pos.y - lastPos.y),
+        };
+
+        render();
+        return false;
+      }
+
       currentTool?.onMove?.call(currentTool, {
         canvas: canvas.current,
         color,
@@ -100,6 +144,12 @@ export default function useWhiteboardCanvas(
         e,
         offset: offset.current,
         markDirty,
+        allowTouchScroll() {
+          touchScrollAllowed.current = true;
+        },
+        disallowTouchScroll() {
+          touchScrollAllowed.current = false;
+        },
         mouse: {
           isDown,
           viewportPosition: {
@@ -121,6 +171,11 @@ export default function useWhiteboardCanvas(
       const adjustedPos = adjust(pos, offset.current, -1);
       mousePosition.current = adjustedPos;
 
+      if (isTouchScrolling.current) {
+        isTouchScrolling.current = false;
+        return false;
+      }
+
       currentTool?.onUp?.call(currentTool, {
         canvas: canvas.current,
         color,
@@ -129,6 +184,12 @@ export default function useWhiteboardCanvas(
         e,
         offset: offset.current,
         markDirty,
+        allowTouchScroll() {
+          touchScrollAllowed.current = true;
+        },
+        disallowTouchScroll() {
+          touchScrollAllowed.current = false;
+        },
         mouse: {
           isDown: false,
           viewportPosition: {
@@ -152,6 +213,11 @@ export default function useWhiteboardCanvas(
 
       mousePosition.current = adjustedPos;
 
+      if (touchScrollAllowed && (e.pointerType === "touch" || e.button === 1)) {
+        isTouchScrolling.current = true;
+        return false;
+      }
+
       currentTool?.onDown?.call(currentTool, {
         canvas: canvas.current,
         color,
@@ -160,6 +226,12 @@ export default function useWhiteboardCanvas(
         e,
         offset: offset.current,
         markDirty,
+        allowTouchScroll() {
+          touchScrollAllowed.current = true;
+        },
+        disallowTouchScroll() {
+          touchScrollAllowed.current = false;
+        },
         mouse: {
           isDown: true,
           viewportPosition: {

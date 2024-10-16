@@ -42,6 +42,13 @@ const Toolbar = forwardRef(
           <GoogleIcon icon="select" />
           Select
         </button>
+        <button
+          className={cx("tool", { selected: tool === "lasso" })}
+          onClick={() => onToolChange("lasso")}
+        >
+          <GoogleIcon icon="lasso_select" />
+          Lasso
+        </button>
         <div>Color:</div>
         <input
           type="color"

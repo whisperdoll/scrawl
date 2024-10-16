@@ -3,30 +3,25 @@ import { Point, Rect } from "../lib/types.ts";
 import {
   distance as distanceBetween,
   pointArray,
+  polygonContainsPoint,
   rectContainsPoint,
 } from "../lib/utils.ts";
-import { Tool, ToolContext } from "./helpers.ts";
+import { drawPolyLine, Tool, ToolContext } from "./helpers.ts";
 
-interface SelectTool extends Tool {
+interface LassoTool extends Tool {
   selectRect: Rect | null;
+  lasso: Point[];
   selectedIndexes: number[];
   action: "select" | "move";
+  lastRecorded: Point;
   onMove: Required<Tool>["onMove"];
-  onDown: Required<Tool>["onMove"];
+  onDown: Required<Tool>["onDown"];
 }
 
-function setSelectRect(select: SelectTool, context: ToolContext) {
-  const dp = context.mouse.documentPosition;
-  select.selectRect = {
-    x: Math.min(dp.original.x, dp.current.x),
-    y: Math.min(dp.original.y, dp.current.y),
-    w: Math.abs(dp.original.x - dp.current.x),
-    h: Math.abs(dp.original.y - dp.current.y),
-  };
-}
-
-const Select: SelectTool = {
+const Lasso: LassoTool = {
+  lastRecorded: { x: 0, y: 0 },
   selectRect: null,
+  lasso: [],
   selectedIndexes: [],
   action: "select",
   onMove(context) {
@@ -41,7 +36,14 @@ const Select: SelectTool = {
     if (!mouse.isDown) return;
 
     if (this.action === "select") {
-      setSelectRect(this, context);
+      const distance = distanceBetween(
+        mouse.documentPosition.current,
+        this.lastRecorded
+      );
+      if (distance < 4) return false;
+
+      this.lastRecorded = mouse.documentPosition.current;
+      this.lasso.push(mouse.documentPosition.current);
 
       context.markDirty();
     } else if (this.selectRect) {
@@ -65,6 +67,7 @@ const Select: SelectTool = {
   },
   onDown(context) {
     context.disallowTouchScroll();
+    this.lasso = [];
     if (
       this.selectRect &&
       rectContainsPoint(this.selectRect, context.mouse.documentPosition.current)
@@ -72,12 +75,13 @@ const Select: SelectTool = {
       this.action = "move";
     } else {
       this.action = "select";
+      this.lastRecorded = context.mouse.documentPosition.current;
     }
   },
   onUp(context) {
     context.allowTouchScroll();
     if (this.action === "select") {
-      setSelectRect(this, context);
+      this.lasso.push(context.mouse.documentPosition.current);
       this.action = "move";
 
       let leftMost: number | undefined;
@@ -88,9 +92,8 @@ const Select: SelectTool = {
       this.selectedIndexes = context.data.current
         .map((stroke, i) => {
           if (
-            stroke.points.filter((pt) =>
-              rectContainsPoint(this.selectRect!, pt)
-            ).length >
+            stroke.points.filter((pt) => polygonContainsPoint(this.lasso!, pt))
+              .length >
             stroke.points.length / 2
           ) {
             stroke.points.forEach((pt) => {
@@ -131,7 +134,14 @@ const Select: SelectTool = {
     }
   },
   render(context) {
-    if (this.selectRect) {
+    if (this.lasso && this.action === "select") {
+      drawPolyLine(context.canvas, this.lasso.concat(this.lasso[0]), {
+        color: "white",
+        size: 1,
+        lineDash: [3, 3],
+        offset: context.offset,
+      });
+    } else if (this.selectRect && this.action === "move") {
       const canvasContext = context.canvas.getContext("2d");
       if (!canvasContext) {
         throw new Error("couldnt get da context woops!");
@@ -187,4 +197,4 @@ const Select: SelectTool = {
   },
 };
 
-export default Select;
+export default Lasso;
