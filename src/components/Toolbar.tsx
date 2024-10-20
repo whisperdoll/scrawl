@@ -1,8 +1,9 @@
 import { forwardRef } from "react";
 import "./Toolbar.scss";
-import { tryParseInt } from "../lib/utils";
+import { SetStateType, tryParseInt } from "../lib/utils.ts";
 import GoogleIcon from "./GoogleIcon.tsx";
 import { cx } from "../lib/utils.ts";
+import { ToolString } from "../lib/types.ts";
 
 const colors = [
   "#FFFFFF",
@@ -14,7 +15,18 @@ const colors = [
   "#FFFF80",
 ];
 
-const Toolbar = forwardRef(
+const Toolbar = forwardRef<
+  HTMLDivElement,
+  {
+    path: string;
+    tool: ToolString;
+    onToolChange: SetStateType<ToolString>;
+    color: string;
+    onColorChange: SetStateType<string>;
+    size: number;
+    onSizeChange: SetStateType<number>;
+  }
+>(
   (
     { path, tool, onToolChange, color, onColorChange, size, onSizeChange },
     ref

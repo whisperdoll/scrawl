@@ -1,7 +1,15 @@
-import { adjust } from "../lib/offsetHelpers.js";
-import { Point, Rect } from "../lib/types.ts";
+import { adjust } from "../lib/offsetHelpers.ts";
 import {
+  DocumentData,
+  DocumentDataElement,
+  Point,
+  Rect,
+} from "../lib/types.ts";
+import {
+  dataBounds,
+  dataToImage,
   distance as distanceBetween,
+  normalizeData,
   pointArray,
   rectContainsPoint,
 } from "../lib/utils.ts";
@@ -9,10 +17,11 @@ import { Tool, ToolContext } from "./helpers.ts";
 
 interface SelectTool extends Tool {
   selectRect: Rect | null;
-  selectedIndexes: number[];
-  action: "select" | "move";
   onMove: Required<Tool>["onMove"];
-  onDown: Required<Tool>["onMove"];
+  onDown: Required<Tool>["onDown"];
+  onUp: Required<Tool>["onUp"];
+  onDeselect: Required<Tool>["onDeselect"];
+  render: Required<Tool>["render"];
 }
 
 function setSelectRect(select: SelectTool, context: ToolContext) {
@@ -23,144 +32,45 @@ function setSelectRect(select: SelectTool, context: ToolContext) {
     w: Math.abs(dp.original.x - dp.current.x),
     h: Math.abs(dp.original.y - dp.current.y),
   };
+  context.markDirty();
 }
 
 const Select: SelectTool = {
   selectRect: null,
-  selectedIndexes: [],
-  action: "select",
   onMove(context) {
-    const { mouse } = context;
+    if (!context.mouse.isDown || context.selectedIndexes.length) return;
 
-    context.canvas.style.cursor =
-      this.selectRect &&
-      rectContainsPoint(this.selectRect, mouse.documentPosition.current)
-        ? "move"
-        : "";
-
-    if (!mouse.isDown) return;
-
-    if (this.action === "select") {
-      setSelectRect(this, context);
-
-      context.markDirty();
-    } else if (this.selectRect) {
-      const deltaX =
-        mouse.documentPosition.current.x - mouse.documentPosition.last.x;
-      const deltaY =
-        mouse.documentPosition.current.y - mouse.documentPosition.last.y;
-
-      this.selectedIndexes.forEach((i) => {
-        context.data.current[i].points.forEach((pt) => {
-          pt.x += deltaX;
-          pt.y += deltaY;
-        });
-      });
-
-      this.selectRect.x += deltaX;
-      this.selectRect.y += deltaY;
-
-      context.markDirty();
-    }
+    setSelectRect(this, context);
   },
   onDown(context) {
     context.disallowTouchScroll();
-    if (
-      this.selectRect &&
-      rectContainsPoint(this.selectRect, context.mouse.documentPosition.current)
-    ) {
-      this.action = "move";
-    } else {
-      this.action = "select";
-    }
   },
   onUp(context) {
     context.allowTouchScroll();
-    if (this.action === "select") {
-      setSelectRect(this, context);
-      this.action = "move";
+    if (!this.selectRect) return;
 
-      let leftMost: number | undefined;
-      let rightMost: number | undefined;
-      let topMost: number | undefined;
-      let bottomMost: number | undefined;
+    setSelectRect(this, context);
 
-      this.selectedIndexes = context.data.current
-        .map((stroke, i) => {
-          if (
-            stroke.points.filter((pt) =>
-              rectContainsPoint(this.selectRect!, pt)
-            ).length >
-            stroke.points.length / 2
-          ) {
-            stroke.points.forEach((pt) => {
-              const padding = stroke.size * 4;
-              if (leftMost === undefined || pt.x - padding < leftMost) {
-                leftMost = pt.x - padding;
-              }
-              if (rightMost === undefined || pt.x + padding > rightMost) {
-                rightMost = pt.x + padding;
-              }
-              if (topMost === undefined || pt.y - padding < topMost) {
-                topMost = pt.y - padding;
-              }
-              if (bottomMost === undefined || pt.y + padding > bottomMost) {
-                bottomMost = pt.y + padding;
-              }
-            });
+    const indexesInSelection = context.data.current
+      .map((stroke, i) => {
+        const inRect = stroke.points.filter((pt) =>
+          rectContainsPoint(this.selectRect!, pt)
+        );
+        const shouldCount = inRect.length > stroke.points.length / 2;
+        return shouldCount ? i : null;
+      })
+      .filter((x) => x !== null);
 
-            return i;
-          } else {
-            return null;
-          }
-        })
-        .filter((i) => i !== null);
+    context.setSelectedIndexes(indexesInSelection);
 
-      if (this.selectedIndexes.length === 0) {
-        this.selectRect = null;
-      } else if (leftMost && rightMost && topMost && bottomMost) {
-        this.selectRect = {
-          x: leftMost,
-          y: topMost,
-          w: rightMost - leftMost,
-          h: bottomMost - topMost,
-        };
-      }
-
-      context.markDirty();
-    }
+    this.selectRect = null;
+    context.markDirty();
   },
   render(context) {
-    if (this.selectRect) {
+    if (this.selectRect && context.selectedIndexes.length === 0) {
       const canvasContext = context.canvas.getContext("2d");
-      if (!canvasContext) {
-        throw new Error("couldnt get da context woops!");
-      }
+      if (!canvasContext) throw new Error("couldnt get contewxttt");
 
-      canvasContext.globalCompositeOperation = "destination-over";
-      context.data.current.forEach((stroke, strokeIndex) => {
-        if (this.selectedIndexes.includes(strokeIndex)) {
-          canvasContext.fillStyle = "#773";
-          canvasContext.strokeStyle = "#773";
-          canvasContext.lineWidth = stroke.size * 2;
-
-          canvasContext.beginPath();
-
-          canvasContext.moveTo(
-            ...pointArray(adjust(stroke.points[0], context.offset))
-          );
-
-          for (let i = 1; i < stroke.points.length; i++) {
-            canvasContext.lineTo(
-              ...pointArray(adjust(stroke.points[i], context.offset))
-            );
-          }
-
-          canvasContext.stroke();
-        }
-      });
-
-      canvasContext.globalCompositeOperation = "source-over";
       canvasContext.fillStyle = "white";
       canvasContext.strokeStyle = "white";
       canvasContext.lineWidth = 1;
@@ -175,14 +85,11 @@ const Select: SelectTool = {
       );
       canvasContext.stroke();
       canvasContext.setLineDash([]);
-    } else {
-      context.canvas.style.cursor = "";
     }
   },
   onDeselect(context) {
     this.selectRect = null;
-    this.selectedIndexes = [];
-    this.action = "select";
+    context.setSelectedIndexes([]);
     context.markDirty();
   },
 };

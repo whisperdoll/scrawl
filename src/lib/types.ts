@@ -25,3 +25,5 @@ export type DocumentDataElement = {
 };
 
 export type DocumentData = DocumentDataElement[];
+
+export type ToolString = "draw" | "erase" | "select" | "lasso";

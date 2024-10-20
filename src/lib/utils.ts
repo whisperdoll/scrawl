@@ -1,4 +1,14 @@
-import { Point, Rect } from "./types.js";
+import { drawPolyLine } from "../tools/helpers.ts";
+import { DocumentData, DocumentDataElement, Point, Rect } from "./types.js";
+import {
+  Dispatch,
+  SetStateAction,
+  type MutableRefObject,
+  type RefCallback,
+} from "react";
+
+export const isFunction = (x: unknown) => typeof x === "function";
+export const isNullOrUndefined = (x: unknown) => x === undefined || x === null;
 
 export const tryParseInt = (value: number | string, fallback: number) => {
   const parsed = parseInt(value as string);
@@ -83,3 +93,142 @@ export function polygonContainsPoint(polygon: Point[], point: Point) {
 
   return inside;
 }
+
+type DataBounds = {
+  leftMost: { value: number; padding: number };
+  rightMost: { value: number; padding: number };
+  topMost: { value: number; padding: number };
+  bottomMost: { value: number; padding: number };
+  paddedRect: Rect;
+};
+export function dataBounds(
+  data: DocumentDataElement[],
+  extraPadding: number | ((strokeSize: number) => number) = 0
+): DataBounds | null {
+  let leftMost: { value: number; padding: number } | null = null;
+  let rightMost: { value: number; padding: number } | null = null;
+  let topMost: { value: number; padding: number } | null = null;
+  let bottomMost: { value: number; padding: number } | null = null;
+
+  for (const d of data) {
+    const padding =
+      d.size +
+      (typeof extraPadding === "function"
+        ? extraPadding(d.size)
+        : extraPadding);
+    for (const p of d.points) {
+      if (!leftMost || p.x - padding < leftMost.value - leftMost.padding) {
+        leftMost = { value: p.x, padding };
+      }
+      if (!rightMost || p.x + padding > rightMost.value + rightMost.padding) {
+        rightMost = { value: p.x, padding };
+      }
+      if (!topMost || p.y - padding < topMost.value - topMost.padding) {
+        topMost = { value: p.y, padding };
+      }
+      if (
+        !bottomMost ||
+        p.y + padding > bottomMost.value + bottomMost.padding
+      ) {
+        bottomMost = { value: p.y, padding };
+      }
+    }
+  }
+
+  if (!leftMost || !rightMost || !topMost || !bottomMost) {
+    return null;
+  }
+
+  const width =
+    rightMost.value + rightMost.padding - (leftMost.value - leftMost.padding);
+  const height =
+    bottomMost.value + bottomMost.padding - (topMost.value - topMost.padding);
+
+  return {
+    leftMost,
+    topMost,
+    rightMost,
+    bottomMost,
+    paddedRect: {
+      x: leftMost.value - leftMost.padding,
+      y: topMost.value - topMost.padding,
+      w: width,
+      h: height,
+    },
+  };
+}
+
+export function normalizeData(
+  data: DocumentDataElement[]
+): DocumentDataElement[] {
+  const bounds = dataBounds(data);
+  if (!bounds) return [];
+
+  const { leftMost, topMost } = bounds;
+
+  return data.map((d) => {
+    return {
+      ...d,
+      points: d.points.map((p) => ({
+        x: p.x - leftMost.value + leftMost.padding,
+        y: p.y - topMost.value + topMost.padding,
+      })),
+    };
+  });
+}
+
+export function dataToImage(data: DocumentDataElement[]): Promise<Blob | null> {
+  return new Promise((resolve, reject) => {
+    const bounds = dataBounds(data);
+    if (!bounds) return resolve(null);
+
+    const { paddedRect } = bounds;
+
+    const canvas = document.createElement("canvas");
+    canvas.width = paddedRect.w;
+    canvas.height = paddedRect.h;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return reject("couldnt get canvas context");
+
+    ctx.fillStyle = "#222";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    const offset: Point = {
+      x: -paddedRect.x,
+      y: -paddedRect.y,
+    };
+
+    for (const d of data) {
+      drawPolyLine(canvas, d.points, { color: d.color, size: d.size, offset });
+    }
+
+    canvas.toBlob((blob) => {
+      if (!blob) return reject("couldnt make blob");
+
+      resolve(blob);
+    });
+  });
+}
+
+type MutableRefList<T> = Array<
+  RefCallback<T> | MutableRefObject<T> | undefined | null
+>;
+
+export function mergeRefs<T>(...refs: MutableRefList<T>): RefCallback<T> {
+  return (val: T) => {
+    setRef(val, ...refs);
+  };
+}
+
+export function setRef<T>(val: T, ...refs: MutableRefList<T>): void {
+  refs.forEach((ref) => {
+    if (typeof ref === "function") {
+      ref(val);
+    } else if (!isNullOrUndefined(ref)) {
+      ref.current = val;
+    }
+  });
+}
+
+export type SetStateType<T> = Dispatch<SetStateAction<T>>;
+export type StateType<T, T2 = T> = [T, SetStateType<T2>];

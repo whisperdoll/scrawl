@@ -1,4 +1,5 @@
-import { adjust } from "../lib/offsetHelpers.js";
+import { SetStateAction } from "react";
+import { adjust } from "../lib/offsetHelpers.ts";
 import { DocumentData, Point } from "../lib/types.ts";
 import { pointArray } from "../lib/utils.ts";
 
@@ -8,6 +9,8 @@ export interface Tool {
   onDown?: (context: ToolContext) => any;
   onSelect?: (context: SelectContext) => any;
   onDeselect?: (context: SelectContext) => any;
+  onKeyDown?: (context: KeyEventContext) => any;
+  onKeyUp?: (context: KeyEventContext) => any;
   render?: (context: RenderContext) => any;
 }
 
@@ -17,12 +20,18 @@ export interface RenderContext {
   data: React.MutableRefObject<DocumentData>;
   color: string;
   size: number;
+  selectedIndexes: number[];
+  setSelectedIndexes: (indexes: SetStateAction<number[]>) => void;
 }
 
 export interface SelectContext extends RenderContext {
   markDirty: () => void;
   allowTouchScroll: () => void;
   disallowTouchScroll: () => void;
+}
+
+export interface KeyEventContext extends SelectContext {
+  e: KeyboardEvent;
 }
 
 export interface ToolContext extends SelectContext {

@@ -26,6 +26,13 @@ const Draw: DrawTool = {
     );
     if (distance < data.at(-1)!.size / 2) return false;
 
+    // console.log(
+    //   distanceBetween(
+    //     mouse.documentPosition.current,
+    //     mouse.documentPosition.last
+    //   )
+    // );
+
     this.lastRecorded = mouse.documentPosition.current;
     data.at(-1)!.points.push(mouse.documentPosition.current);
     drawLine(

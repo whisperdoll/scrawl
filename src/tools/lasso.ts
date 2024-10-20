@@ -1,4 +1,4 @@
-import { adjust } from "../lib/offsetHelpers.js";
+import { adjust } from "../lib/offsetHelpers.ts";
 import { Point, Rect } from "../lib/types.ts";
 import {
   distance as distanceBetween,
@@ -6,13 +6,12 @@ import {
   polygonContainsPoint,
   rectContainsPoint,
 } from "../lib/utils.ts";
+import Erase from "./erase.ts";
 import { drawPolyLine, Tool, ToolContext } from "./helpers.ts";
+import Select from "./select.ts";
 
 interface LassoTool extends Tool {
-  selectRect: Rect | null;
   lasso: Point[];
-  selectedIndexes: number[];
-  action: "select" | "move";
   lastRecorded: Point;
   onMove: Required<Tool>["onMove"];
   onDown: Required<Tool>["onDown"];
@@ -20,179 +19,59 @@ interface LassoTool extends Tool {
 
 const Lasso: LassoTool = {
   lastRecorded: { x: 0, y: 0 },
-  selectRect: null,
   lasso: [],
-  selectedIndexes: [],
-  action: "select",
   onMove(context) {
     const { mouse } = context;
 
-    context.canvas.style.cursor =
-      this.selectRect &&
-      rectContainsPoint(this.selectRect, mouse.documentPosition.current)
-        ? "move"
-        : "";
-
     if (!mouse.isDown) return;
 
-    if (this.action === "select") {
-      const distance = distanceBetween(
-        mouse.documentPosition.current,
-        this.lastRecorded
-      );
-      if (distance < 4) return false;
+    const distance = distanceBetween(
+      mouse.documentPosition.current,
+      this.lastRecorded
+    );
+    if (distance < 4) return false;
 
-      this.lastRecorded = mouse.documentPosition.current;
-      this.lasso.push(mouse.documentPosition.current);
+    this.lastRecorded = mouse.documentPosition.current;
+    this.lasso.push(mouse.documentPosition.current);
 
-      context.markDirty();
-    } else if (this.selectRect) {
-      const deltaX =
-        mouse.documentPosition.current.x - mouse.documentPosition.last.x;
-      const deltaY =
-        mouse.documentPosition.current.y - mouse.documentPosition.last.y;
-
-      this.selectedIndexes.forEach((i) => {
-        context.data.current[i].points.forEach((pt) => {
-          pt.x += deltaX;
-          pt.y += deltaY;
-        });
-      });
-
-      this.selectRect.x += deltaX;
-      this.selectRect.y += deltaY;
-
-      context.markDirty();
-    }
+    context.markDirty();
   },
   onDown(context) {
     context.disallowTouchScroll();
     this.lasso = [];
-    if (
-      this.selectRect &&
-      rectContainsPoint(this.selectRect, context.mouse.documentPosition.current)
-    ) {
-      this.action = "move";
-    } else {
-      this.action = "select";
-      this.lastRecorded = context.mouse.documentPosition.current;
-    }
+    this.lastRecorded = context.mouse.documentPosition.current;
   },
   onUp(context) {
     context.allowTouchScroll();
-    if (this.action === "select") {
-      this.lasso.push(context.mouse.documentPosition.current);
-      this.action = "move";
+    this.lasso.push(context.mouse.documentPosition.current);
 
-      let leftMost: number | undefined;
-      let rightMost: number | undefined;
-      let topMost: number | undefined;
-      let bottomMost: number | undefined;
+    const indexesInSelection = context.data.current
+      .map((stroke, i) => {
+        const inRect = stroke.points.filter((pt) =>
+          polygonContainsPoint(this.lasso!, pt)
+        );
+        const shouldCount = inRect.length > stroke.points.length / 2;
+        return shouldCount ? i : null;
+      })
+      .filter((x) => x !== null);
 
-      this.selectedIndexes = context.data.current
-        .map((stroke, i) => {
-          if (
-            stroke.points.filter((pt) => polygonContainsPoint(this.lasso!, pt))
-              .length >
-            stroke.points.length / 2
-          ) {
-            stroke.points.forEach((pt) => {
-              const padding = stroke.size * 4;
-              if (leftMost === undefined || pt.x - padding < leftMost) {
-                leftMost = pt.x - padding;
-              }
-              if (rightMost === undefined || pt.x + padding > rightMost) {
-                rightMost = pt.x + padding;
-              }
-              if (topMost === undefined || pt.y - padding < topMost) {
-                topMost = pt.y - padding;
-              }
-              if (bottomMost === undefined || pt.y + padding > bottomMost) {
-                bottomMost = pt.y + padding;
-              }
-            });
+    context.setSelectedIndexes(indexesInSelection);
 
-            return i;
-          } else {
-            return null;
-          }
-        })
-        .filter((i) => i !== null);
-
-      if (this.selectedIndexes.length === 0) {
-        this.selectRect = null;
-      } else if (leftMost && rightMost && topMost && bottomMost) {
-        this.selectRect = {
-          x: leftMost,
-          y: topMost,
-          w: rightMost - leftMost,
-          h: bottomMost - topMost,
-        };
-      }
-
-      context.markDirty();
-    }
+    this.lasso = [];
+    context.markDirty();
   },
   render(context) {
-    if (this.lasso && this.action === "select") {
+    if (this.lasso.length) {
       drawPolyLine(context.canvas, this.lasso.concat(this.lasso[0]), {
         color: "white",
         size: 1,
         lineDash: [3, 3],
         offset: context.offset,
       });
-    } else if (this.selectRect && this.action === "move") {
-      const canvasContext = context.canvas.getContext("2d");
-      if (!canvasContext) {
-        throw new Error("couldnt get da context woops!");
-      }
-
-      canvasContext.globalCompositeOperation = "destination-over";
-      context.data.current.forEach((stroke, strokeIndex) => {
-        if (this.selectedIndexes.includes(strokeIndex)) {
-          canvasContext.fillStyle = "#773";
-          canvasContext.strokeStyle = "#773";
-          canvasContext.lineWidth = stroke.size * 2;
-
-          canvasContext.beginPath();
-
-          canvasContext.moveTo(
-            ...pointArray(adjust(stroke.points[0], context.offset))
-          );
-
-          for (let i = 1; i < stroke.points.length; i++) {
-            canvasContext.lineTo(
-              ...pointArray(adjust(stroke.points[i], context.offset))
-            );
-          }
-
-          canvasContext.stroke();
-        }
-      });
-
-      canvasContext.globalCompositeOperation = "source-over";
-      canvasContext.fillStyle = "white";
-      canvasContext.strokeStyle = "white";
-      canvasContext.lineWidth = 1;
-      canvasContext.setLineDash([3, 3]);
-
-      canvasContext.beginPath();
-      canvasContext.rect(
-        this.selectRect.x + context.offset.x,
-        this.selectRect.y + context.offset.y,
-        this.selectRect.w,
-        this.selectRect.h
-      );
-      canvasContext.stroke();
-      canvasContext.setLineDash([]);
-    } else {
-      context.canvas.style.cursor = "";
     }
   },
   onDeselect(context) {
-    this.selectRect = null;
-    this.selectedIndexes = [];
-    this.action = "select";
+    this.lasso = [];
     context.markDirty();
   },
 };
