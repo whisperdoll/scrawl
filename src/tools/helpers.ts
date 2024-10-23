@@ -14,12 +14,19 @@ export interface Tool {
   render?: (context: RenderContext) => any;
 }
 
+interface UndoManagement {
+  undo: () => any;
+  redo: () => any;
+  pushUndo: () => any;
+}
+
 export interface RenderContext {
   canvas: HTMLCanvasElement;
   offset: Point;
   data: React.MutableRefObject<DocumentData>;
   color: string;
   size: number;
+  zoom: number;
   selectedIndexes: number[];
   setSelectedIndexes: (indexes: SetStateAction<number[]>) => void;
 }
@@ -30,11 +37,11 @@ export interface SelectContext extends RenderContext {
   disallowTouchScroll: () => void;
 }
 
-export interface KeyEventContext extends SelectContext {
+export interface KeyEventContext extends SelectContext, UndoManagement {
   e: KeyboardEvent;
 }
 
-export interface ToolContext extends SelectContext {
+export interface ToolContext extends SelectContext, UndoManagement {
   e: PointerEvent;
   mouse: {
     isDown: boolean;
@@ -57,7 +64,7 @@ export function drawPolyLine(
   options: {
     color: string;
     size: number;
-    offset: Point;
+    offset?: Point;
     drawMode?: "document" | "viewport";
     lineDash?: number[];
   }
@@ -78,9 +85,9 @@ export function drawPolyLine(
   canvasContext.setLineDash(options.lineDash || []);
 
   const adjustedPoints =
-    options?.drawMode === "viewport"
+    options?.drawMode === "viewport" || !options.offset
       ? points
-      : points.map((p) => adjust(p, options.offset));
+      : points.map((p) => adjust(p, options.offset!));
 
   canvasContext.beginPath();
   canvasContext.moveTo(...pointArray(adjustedPoints[0]));
@@ -97,10 +104,27 @@ export function drawLine(
   options: {
     color: string;
     size: number;
-    offset: Point;
+    offset?: Point;
     drawMode?: "document" | "viewport";
     lineDash?: number[];
   }
 ) {
   drawPolyLine(canvas, [from, to], options);
+}
+
+export function drawCircle(
+  canvas: HTMLCanvasElement,
+  center: Point,
+  radius: number,
+  color: string
+) {
+  const ctx = canvas.getContext("2d");
+  if (!ctx) {
+    throw new Error("couldnt get context lol");
+  }
+
+  ctx.beginPath();
+  ctx.arc(center.x, center.y, radius, 0, 2 * Math.PI, false);
+  ctx.fillStyle = color;
+  ctx.fill();
 }

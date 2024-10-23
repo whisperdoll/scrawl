@@ -12,14 +12,21 @@ import {
   dataBounds,
   dataToImage,
   distance as distanceBetween,
+  multiplyPt,
   normalizeData,
   rectContainsPoint,
+  viewportToDocument,
 } from "../lib/utils.ts";
 import useCanvasListeners from "./useCanvasListeners.ts";
 import useEffectAsync from "./useEffectAsync.js";
 import useWhiteboardRendering from "./useWhiteboardRendering.js";
 import Draw from "../tools/draw.ts";
-import { DocumentData, DocumentDataElement, Rect } from "../lib/types.ts";
+import {
+  DocumentData,
+  DocumentDataElement,
+  Point,
+  Rect,
+} from "../lib/types.ts";
 import Erase from "../tools/erase.ts";
 import Select from "../tools/select.ts";
 import {
@@ -27,28 +34,11 @@ import {
   RenderContext,
   SelectContext,
   Tool,
+  ToolContext as ToolEventContext,
 } from "../tools/helpers.ts";
 import Lasso from "../tools/lasso.ts";
 import { ToolContext } from "../contexts/contexts.ts";
-
-/*
-  data format:
-  {
-    points: [{ x, y }, ...],
-    color: 'white',
-    size: 4
-  }
-*/
-
-async function saveToStorage(path: string, data: DocumentData) {
-  if (!path) return;
-
-  const store = localforage.createInstance({
-    name: "notes",
-  });
-
-  await store.setItem(path, data);
-}
+import useSaveDocument from "./useSaveDocument.ts";
 
 export default function useWhiteboardCanvas(
   canvas: React.MutableRefObject<HTMLCanvasElement>,
@@ -58,7 +48,6 @@ export default function useWhiteboardCanvas(
 ) {
   const { tool, size, color } = options;
   const [_tool, setTool] = useContext(ToolContext);
-  const mousePosition = useRef({ x: 0, y: 0 });
 
   const selectedIndexes = useRef<number[]>([]);
   const selectRect = useRef<Rect | null>(null);
@@ -66,6 +55,11 @@ export default function useWhiteboardCanvas(
   const offset = useRef({ x: 0, y: 0 });
   const touchScrollAllowed = useRef(true);
   const isTouchScrolling = useRef(false);
+  const zoom = useRef(1);
+  const undoStack = useRef<DocumentData[]>([]);
+  const redoStack = useRef<DocumentData[]>([]);
+
+  const saveToStorage = useSaveDocument();
 
   const currentTool: Tool | null = useMemo(() => {
     return (
@@ -86,6 +80,7 @@ export default function useWhiteboardCanvas(
       color,
       size,
       data,
+      zoom: zoom.current,
       offset: offset.current,
       selectedIndexes: selectedIndexes.current,
       setSelectedIndexes,
@@ -99,13 +94,37 @@ export default function useWhiteboardCanvas(
     selectedIndexes,
     selectRect,
     offset,
+    zoom,
     renderCurrentTool
   );
 
   const markDirty = useCallback(() => {
     saveToStorage(path, data.current);
     render();
-  }, [render]);
+  }, [render, path]);
+
+  const pushUndo = useCallback(() => {
+    undoStack.current.push(structuredClone(data.current));
+    redoStack.current = [];
+  }, [undoStack, redoStack, data]);
+
+  const undo = useCallback(() => {
+    if (undoStack.current.length === 0) return;
+
+    const lastState = undoStack.current.pop()!;
+    redoStack.current.push(data.current);
+    data.current = lastState;
+    markDirty();
+  }, [undoStack, redoStack, data]);
+
+  const redo = useCallback(() => {
+    if (redoStack.current.length === 0) return;
+
+    const targetState = redoStack.current.pop()!;
+    undoStack.current.push(data.current);
+    data.current = targetState;
+    markDirty();
+  }, [undoStack, redoStack, data]);
 
   const setSelectedIndexes: RenderContext["setSelectedIndexes"] = useCallback(
     (indexes: SetStateAction<number[]>) => {
@@ -126,6 +145,77 @@ export default function useWhiteboardCanvas(
     [selectedIndexes, selectRect, markDirty]
   );
 
+  // scroll
+  useEffect(() => {
+    const onScroll = (e: WheelEvent) => {
+      e.preventDefault();
+
+      if (e.ctrlKey) {
+        const pt = { x: e.offsetX, y: e.offsetY };
+        const beforePos = viewportToDocument(pt, zoom.current, offset.current);
+        const factor =
+          e.deltaY < 0 ? (-e.deltaY / 100) * 1.2 : 1 / ((e.deltaY / 100) * 1.2);
+        zoom.current *= factor;
+        const afterPos = viewportToDocument(pt, zoom.current, offset.current);
+        const delta = {
+          x: afterPos.x - beforePos.x,
+          y: afterPos.y - beforePos.y,
+        };
+        offset.current = {
+          x: offset.current.x + delta.x * zoom.current,
+          y: offset.current.y + delta.y * zoom.current,
+        };
+      } else {
+        if (e.shiftKey) {
+          offset.current = {
+            x: offset.current.x - e.deltaY,
+            y: offset.current.y - e.deltaX,
+          };
+        } else {
+          offset.current = {
+            x: offset.current.x - e.deltaX,
+            y: offset.current.y - e.deltaY,
+          };
+        }
+      }
+
+      render();
+    };
+
+    canvas.current.addEventListener("wheel", onScroll);
+
+    return () => {
+      canvas.current.removeEventListener("wheel", onScroll);
+    };
+  }, []);
+
+  async function copySelection() {
+    const copied = selectedIndexes.current.map((i) => data.current[i]);
+    const blob = await dataToImage(copied);
+    if (!blob) return;
+    const clipboardItem = new ClipboardItem({
+      "image/png": blob,
+      "text/plain": new Blob(
+        [JSON.stringify({ __id: "scrawl", data: normalizeData(copied) })],
+        {
+          type: "text/plain",
+        }
+      ),
+    });
+    navigator.clipboard.write([clipboardItem]);
+  }
+
+  function deleteSelection() {
+    selectedIndexes.current
+      .sort((a, b) => b - a)
+      .forEach((index) => {
+        data.current.splice(index, 1);
+      });
+
+    setSelectedIndexes([]);
+  }
+
+  // keys
   useEffect(() => {
     const keyEventContext: (e: KeyboardEvent) => KeyEventContext = (e) => ({
       canvas: canvas.current,
@@ -133,9 +223,13 @@ export default function useWhiteboardCanvas(
       size,
       data,
       offset: offset.current,
+      zoom: zoom.current,
       selectedIndexes: selectedIndexes.current,
       setSelectedIndexes,
       markDirty,
+      undo,
+      redo,
+      pushUndo,
       allowTouchScroll() {
         touchScrollAllowed.current = true;
       },
@@ -154,34 +248,29 @@ export default function useWhiteboardCanvas(
         setTool("select");
       } else if (e.key === "l" || e.key === "w") {
         setTool("lasso");
+      } else if (e.key === "z" && e.ctrlKey && !e.shiftKey) {
+        undo();
+      }
+      if (e.ctrlKey && (e.key === "y" || (e.key === "Z" && e.shiftKey))) {
+        redo();
       } else if (
         selectedIndexes.current.length &&
         (e.key === "Delete" || e.key === "Backspace")
       ) {
-        selectedIndexes.current
-          .sort((a, b) => b - a)
-          .forEach((index) => {
-            data.current.splice(index, 1);
-          });
+        pushUndo();
 
-        setSelectedIndexes([]);
+        deleteSelection();
 
         markDirty();
       } else if (e.key === "c" && e.ctrlKey && selectedIndexes.current.length) {
-        const copied = selectedIndexes.current.map((i) => data.current[i]);
-        const blob = await dataToImage(copied);
-        if (!blob) return;
-        const clipboardItem = new ClipboardItem({
-          "image/png": blob,
-          "text/plain": new Blob(
-            [JSON.stringify({ __id: "scrawl", data: normalizeData(copied) })],
-            {
-              type: "text/plain",
-            }
-          ),
-        });
-        navigator.clipboard.write([clipboardItem]);
+        await copySelection();
+      } else if (e.ctrlKey && e.key === "x") {
+        await copySelection();
+        pushUndo();
+        deleteSelection();
+        markDirty();
       } else if (e.key === "v" && e.ctrlKey) {
+        let pushedUndo = false;
         const items = await navigator.clipboard.read();
         for (const item of items) {
           if (item.types.includes("text/plain")) {
@@ -213,6 +302,11 @@ export default function useWhiteboardCanvas(
             const height = bounds.paddedRect.h;
 
             const startIndex = data.current.length;
+
+            if (!pushedUndo) {
+              pushUndo();
+              pushedUndo = true;
+            }
 
             data.current.push(
               ...pastingData.map((d) => ({
@@ -252,6 +346,7 @@ export default function useWhiteboardCanvas(
     };
   });
 
+  // tool selection
   useEffect(() => {
     const selectContext: SelectContext = {
       canvas: canvas.current,
@@ -259,6 +354,7 @@ export default function useWhiteboardCanvas(
       size,
       data,
       offset: offset.current,
+      zoom: zoom.current,
       selectedIndexes: selectedIndexes.current,
       setSelectedIndexes,
       markDirty,
@@ -278,23 +374,26 @@ export default function useWhiteboardCanvas(
     currentTool?.onSelect?.call(currentTool, selectContext);
   }, [currentTool]);
 
+  // load
   useEffectAsync(async () => {
     const store = localforage.createInstance({
       name: "notes",
     });
 
     data.current = (path && (await store.getItem(path))) || [];
+    offset.current = { x: 0, y: 0 };
     render();
   }, [path]);
+
+  function getDocumentPosition(rawMousePos: Point): Point {
+    return viewportToDocument(rawMousePos, zoom.current, offset.current);
+  }
 
   useCanvasListeners(canvas.current, {
     move(pos, e, lastPos, originalPos, isDown) {
       // console.log(pos, distanceBetween(pos, lastPos));
       e.preventDefault();
       e.stopPropagation();
-
-      const adjustedPos = adjust(pos, offset.current, -1);
-      mousePosition.current = adjustedPos;
 
       // touch scrolling
       if (isTouchScrolling.current) {
@@ -307,16 +406,20 @@ export default function useWhiteboardCanvas(
         return false;
       }
 
-      const context = {
+      const context: ToolEventContext = {
         canvas: canvas.current,
         color,
         size,
         data,
         e,
         offset: offset.current,
+        zoom: zoom.current,
         selectedIndexes: selectedIndexes.current,
         setSelectedIndexes,
         markDirty,
+        undo,
+        redo,
+        pushUndo,
         allowTouchScroll() {
           touchScrollAllowed.current = true;
         },
@@ -331,16 +434,20 @@ export default function useWhiteboardCanvas(
             original: originalPos,
           },
           documentPosition: {
-            current: mousePosition.current,
-            last: adjust(lastPos, offset.current, -1),
-            original: adjust(originalPos, offset.current, -1),
+            current: getDocumentPosition(pos),
+            last: getDocumentPosition(lastPos),
+            original: getDocumentPosition(originalPos),
           },
         },
       };
 
       // selection
       canvas.current.style.cursor =
-        selectRect.current && rectContainsPoint(selectRect.current, adjustedPos)
+        selectRect.current &&
+        rectContainsPoint(
+          selectRect.current,
+          context.mouse.documentPosition.current
+        )
           ? "move"
           : "";
       if (isMovingSelection.current && selectRect.current) {
@@ -373,9 +480,6 @@ export default function useWhiteboardCanvas(
       return false;
     },
     up(pos, e, lastPos, originalPos) {
-      const adjustedPos = adjust(pos, offset.current, -1);
-      mousePosition.current = adjustedPos;
-
       if (isTouchScrolling.current) {
         isTouchScrolling.current = false;
         return false;
@@ -383,6 +487,7 @@ export default function useWhiteboardCanvas(
 
       if (isMovingSelection.current) {
         isMovingSelection.current = false;
+        touchScrollAllowed.current = true;
         return false;
       }
 
@@ -393,9 +498,13 @@ export default function useWhiteboardCanvas(
         data,
         e,
         offset: offset.current,
+        zoom: zoom.current,
         selectedIndexes: selectedIndexes.current,
         setSelectedIndexes,
         markDirty,
+        undo,
+        redo,
+        pushUndo,
         allowTouchScroll() {
           touchScrollAllowed.current = true;
         },
@@ -410,9 +519,9 @@ export default function useWhiteboardCanvas(
             original: originalPos,
           },
           documentPosition: {
-            current: mousePosition.current,
-            last: adjust(lastPos, offset.current, -1),
-            original: adjust(originalPos, offset.current, -1),
+            current: getDocumentPosition(pos),
+            last: getDocumentPosition(lastPos),
+            original: getDocumentPosition(originalPos),
           },
         },
       });
@@ -421,12 +530,11 @@ export default function useWhiteboardCanvas(
       e.preventDefault();
       e.stopPropagation();
 
-      const adjustedPos = adjust(pos, offset.current, -1);
-
-      mousePosition.current = adjustedPos;
-
       // touch scrolling
-      if (touchScrollAllowed && (e.pointerType === "touch" || e.button === 1)) {
+      if (
+        touchScrollAllowed.current &&
+        (e.pointerType === "touch" || e.button === 1)
+      ) {
         isTouchScrolling.current = true;
         return false;
       }
@@ -434,13 +542,14 @@ export default function useWhiteboardCanvas(
       // selection
       if (
         selectRect.current &&
-        rectContainsPoint(selectRect.current, adjustedPos)
+        rectContainsPoint(selectRect.current, getDocumentPosition(pos))
       ) {
         isMovingSelection.current = true;
+        touchScrollAllowed.current = false;
         return false;
       }
 
-      setSelectedIndexes([]);
+      if (selectedIndexes.current.length) setSelectedIndexes([]);
 
       currentTool?.onDown?.call(currentTool, {
         canvas: canvas.current,
@@ -449,9 +558,13 @@ export default function useWhiteboardCanvas(
         data,
         e,
         offset: offset.current,
+        zoom: zoom.current,
         selectedIndexes: selectedIndexes.current,
         setSelectedIndexes,
         markDirty,
+        undo,
+        redo,
+        pushUndo,
         allowTouchScroll() {
           touchScrollAllowed.current = true;
         },
@@ -466,9 +579,9 @@ export default function useWhiteboardCanvas(
             original: pos,
           },
           documentPosition: {
-            current: mousePosition.current,
-            last: adjust(pos, offset.current, -1),
-            original: adjust(pos, offset.current, -1),
+            current: getDocumentPosition(pos),
+            last: getDocumentPosition(pos),
+            original: getDocumentPosition(pos),
           },
         },
       });
@@ -477,6 +590,4 @@ export default function useWhiteboardCanvas(
     },
     leave(pos, e) {},
   });
-
-  return { selectedIndexes, selectRect, mousePosition, offset };
 }

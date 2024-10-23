@@ -8,14 +8,7 @@ export default function Whiteboard({ path, size, toolConfig }) {
   const canvasEl = useRef(null);
   const data = useRef([]);
 
-  const lastScrollTime = useRef(0);
-  const lastScrollDirections = useRef([]);
-
-  const { offset } = useWhiteboardCanvas(canvasEl, data, path, toolConfig);
-
-  useEffectAsync(async () => {
-    offset.current = { x: 0, y: 0 };
-  }, [path]);
+  useWhiteboardCanvas(canvasEl, data, path, toolConfig);
 
   useEffect(() => {
     if (!canvasEl.current) return;
@@ -45,22 +38,7 @@ export default function Whiteboard({ path, size, toolConfig }) {
       return false;
     };
 
-    const scrollFn = (e) => {
-      if (e.shiftKey) {
-        offset.current = {
-          x: offset.current.x - e.deltaY,
-          y: offset.current.y - e.deltaX,
-        };
-      } else {
-        offset.current = {
-          x: offset.current.x - e.deltaX,
-          y: offset.current.y - e.deltaY,
-        };
-      }
-    };
-
     canvasEl.current.addEventListener("contextmenu", fn);
-    canvasEl.current.addEventListener("wheel", scrollFn);
 
     return () => {
       if (!canvasEl.current) {
@@ -68,7 +46,6 @@ export default function Whiteboard({ path, size, toolConfig }) {
       }
 
       canvasEl.current.removeEventListener("contextmenu", fn);
-      canvasEl.current.removeEventListener("wheel", scrollFn);
     };
   }, []);
 

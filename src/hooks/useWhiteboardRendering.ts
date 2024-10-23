@@ -10,7 +10,12 @@ import { adjust } from "../lib/offsetHelpers.ts";
 import useAnimationFrame from "./useAnimationFrame.js";
 import { DocumentData, Point, Rect } from "../lib/types.ts";
 import { drawPolyLine, Tool } from "../tools/helpers.ts";
-import { dataBounds, pointArray } from "../lib/utils.ts";
+import {
+  dataBounds,
+  documentToViewport,
+  pointArray,
+  rectArray,
+} from "../lib/utils.ts";
 
 export default function useWhiteboardRendering(
   canvas: MutableRefObject<HTMLCanvasElement>,
@@ -19,6 +24,7 @@ export default function useWhiteboardRendering(
   selectedIndexes: MutableRefObject<number[]>,
   selectRect: MutableRefObject<Rect | null>,
   offset: MutableRefObject<Point>,
+  zoom: MutableRefObject<number>,
   extra: () => any
 ) {
   const renderEnqueued = useRef(false);
@@ -39,19 +45,29 @@ export default function useWhiteboardRendering(
     context.clearRect(0, 0, canvas.current.width, canvas.current.height);
 
     for (const stroke of selectedIndexes.current.map((i) => data.current[i])) {
-      drawPolyLine(canvas.current, stroke.points, {
-        color: "#773",
-        size: stroke.size * 2,
-        offset: offset.current,
-      });
+      drawPolyLine(
+        canvas.current,
+        stroke.points.map((p) =>
+          documentToViewport(p, zoom.current, offset.current)
+        ),
+        {
+          color: "#773",
+          size: stroke.size * 2 * zoom.current,
+        }
+      );
     }
 
     data.current.forEach((stroke) => {
-      drawPolyLine(canvas.current, stroke.points, {
-        color: stroke.color,
-        size: stroke.size,
-        offset: offset.current,
-      });
+      drawPolyLine(
+        canvas.current,
+        stroke.points.map((p) =>
+          documentToViewport(p, zoom.current, offset.current)
+        ),
+        {
+          color: stroke.color,
+          size: stroke.size * zoom.current,
+        }
+      );
     });
 
     if (selectRect.current) {
@@ -62,10 +78,9 @@ export default function useWhiteboardRendering(
 
       context.beginPath();
       context.rect(
-        selectRect.current.x + offset.current.x,
-        selectRect.current.y + offset.current.y,
-        selectRect.current.w,
-        selectRect.current.h
+        ...rectArray(
+          documentToViewport(selectRect.current, zoom.current, offset.current)
+        )
       );
       context.stroke();
       context.setLineDash([]);

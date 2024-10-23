@@ -78,6 +78,10 @@ export function pointArray(pt: Point): [number, number] {
   return [pt.x, pt.y];
 }
 
+export function rectArray(r: Rect): [number, number, number, number] {
+  return [r.x, r.y, r.w, r.h];
+}
+
 export function polygonContainsPoint(polygon: Point[], point: Point) {
   const { x, y } = point;
   let inside = false;
@@ -179,7 +183,8 @@ export function normalizeData(
 
 export function dataToImage(data: DocumentDataElement[]): Promise<Blob | null> {
   return new Promise((resolve, reject) => {
-    const bounds = dataBounds(data);
+    const padding = 16;
+    const bounds = dataBounds(data, padding);
     if (!bounds) return resolve(null);
 
     const { paddedRect } = bounds;
@@ -232,3 +237,54 @@ export function setRef<T>(val: T, ...refs: MutableRefList<T>): void {
 
 export type SetStateType<T> = Dispatch<SetStateAction<T>>;
 export type StateType<T, T2 = T> = [T, SetStateType<T2>];
+
+export function multiplyPt(pt: Point, factor: Point | number): Point {
+  if (typeof factor === "number") {
+    return { x: pt.x * factor, y: pt.y * factor };
+  }
+
+  return { x: pt.x * factor.x, y: pt.y * factor.y };
+}
+
+function isRect(r: any): r is Rect {
+  return (
+    r.x !== undefined &&
+    r.y !== undefined &&
+    r.h !== undefined &&
+    r.w !== undefined
+  );
+}
+
+export function viewportToDocument(
+  point: Point | Rect,
+  zoom: number,
+  offset: Point
+): Point | Rect {
+  if (isRect(point)) {
+    return {
+      x: (point.x - offset.x) / zoom,
+      y: (point.y - offset.y) / zoom,
+      w: point.w / zoom,
+      h: point.h / zoom,
+    };
+  } else {
+    return { x: (point.x - offset.x) / zoom, y: (point.y - offset.y) / zoom };
+  }
+}
+
+export function documentToViewport<T extends Point | Rect>(
+  point: T,
+  zoom: number,
+  offset: Point
+): T {
+  if (isRect(point)) {
+    return {
+      x: point.x * zoom + offset.x,
+      y: point.y * zoom + offset.y,
+      w: point.w * zoom,
+      h: point.h * zoom,
+    } as T;
+  } else {
+    return { x: point.x * zoom + offset.x, y: point.y * zoom + offset.y } as T;
+  }
+}

@@ -9,6 +9,7 @@ import {
   dataBounds,
   dataToImage,
   distance as distanceBetween,
+  documentToViewport,
   normalizeData,
   pointArray,
   rectContainsPoint,
@@ -77,12 +78,12 @@ const Select: SelectTool = {
       canvasContext.setLineDash([3, 3]);
 
       canvasContext.beginPath();
-      canvasContext.rect(
-        this.selectRect.x + context.offset.x,
-        this.selectRect.y + context.offset.y,
-        this.selectRect.w,
-        this.selectRect.h
+      const rect = documentToViewport(
+        this.selectRect,
+        context.zoom,
+        context.offset
       );
+      canvasContext.rect(rect.x, rect.y, rect.w, rect.h);
       canvasContext.stroke();
       canvasContext.setLineDash([]);
     }

@@ -9,6 +9,8 @@ interface EraseTool extends Tool {
   onUp: Required<Tool>["onMove"];
 }
 
+let erased = false;
+
 const Erase: EraseTool = {
   lastRecorded: { x: 0, y: 0 },
   onMove(context) {
@@ -58,6 +60,11 @@ const Erase: EraseTool = {
     }
 
     if (toErase.length > 0) {
+      if (!erased) {
+        erased = true;
+        context.pushUndo();
+      }
+
       toErase
         .sort((a, b) => b - a)
         .forEach((index) => {
@@ -71,6 +78,7 @@ const Erase: EraseTool = {
   onDown(context) {
     context.disallowTouchScroll();
     this.lastRecorded = context.mouse.documentPosition.current;
+    erased = false;
   },
   onUp(context) {
     context.allowTouchScroll();

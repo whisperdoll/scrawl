@@ -2,6 +2,7 @@ import { adjust } from "../lib/offsetHelpers.ts";
 import { Point, Rect } from "../lib/types.ts";
 import {
   distance as distanceBetween,
+  documentToViewport,
   pointArray,
   polygonContainsPoint,
   rectContainsPoint,
@@ -62,12 +63,17 @@ const Lasso: LassoTool = {
   },
   render(context) {
     if (this.lasso.length) {
-      drawPolyLine(context.canvas, this.lasso.concat(this.lasso[0]), {
-        color: "white",
-        size: 1,
-        lineDash: [3, 3],
-        offset: context.offset,
-      });
+      drawPolyLine(
+        context.canvas,
+        this.lasso
+          .concat(this.lasso[0])
+          .map((p) => documentToViewport(p, context.zoom, context.offset)),
+        {
+          color: "white",
+          size: 1,
+          lineDash: [3, 3],
+        }
+      );
     }
   },
   onDeselect(context) {

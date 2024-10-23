@@ -21,10 +21,10 @@ const Draw: DrawTool = {
     }
 
     const distance = distanceBetween(
-      mouse.documentPosition.current,
+      mouse.viewportPosition.current,
       this.lastRecorded
     );
-    if (distance < data.at(-1)!.size / 2) return false;
+    if (distance < (data.at(-1)!.size / 4) * context.zoom) return false;
 
     // console.log(
     //   distanceBetween(
@@ -33,18 +33,17 @@ const Draw: DrawTool = {
     //   )
     // );
 
-    this.lastRecorded = mouse.documentPosition.current;
     data.at(-1)!.points.push(mouse.documentPosition.current);
     drawLine(
       context.canvas,
-      mouse.documentPosition.last,
-      mouse.documentPosition.current,
+      this.lastRecorded,
+      mouse.viewportPosition.current,
       {
         color: context.color,
-        size: context.size,
-        offset: context.offset,
+        size: context.size * context.zoom,
       }
     );
+    this.lastRecorded = mouse.viewportPosition.current;
 
     return false;
   },
@@ -62,12 +61,18 @@ const Draw: DrawTool = {
   onDown(context: ToolContext) {
     if (context.e.button === 0) {
       context.disallowTouchScroll();
-      this.lastRecorded = context.mouse.documentPosition.current;
+      this.lastRecorded = context.mouse.viewportPosition.current;
+      context.pushUndo();
       context.data.current.push({
         action: "draw",
         size: context.size,
         color: context.color,
         points: [context.mouse.documentPosition.current],
+      });
+
+      drawLine(context.canvas, this.lastRecorded, this.lastRecorded, {
+        color: context.color,
+        size: context.size * context.zoom,
       });
     } else if (context.e.button === 2 || context.e.button === 5) {
       return Erase.onDown.call(Erase, context);
